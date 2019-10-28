@@ -3,7 +3,6 @@
 using namespace std;
 using namespace moab;
 
-
 clock_t ts1=0;
 clock_t ts2=0;
 clock_t ts3=0;
@@ -91,7 +90,7 @@ void MPFADSolver::run () {
     Epetra_Vector b (row_map);
     Epetra_Vector X (row_map);
 
-    this->assemble_matrix(A, b, volumes, faces, nodes);
+    this->assemble_matrix(A, b, volumes, faces, nodes, gids);
     A.FillComplete();
 
     Epetra_LinearProblem linear_problem (&A, &X, &b);
@@ -167,10 +166,10 @@ void MPFADSolver::init_tags () {
     rval = this->mb->tag_get_handle("DIRICHLET", this->tags[dirichlet]);
     rval = this->mb->tag_get_handle("NEUMANN", this->tags[neumann]);
     rval = this->mb->tag_get_handle("SOURCE", this->tags[source]);
-    rval = this->mb->tag_get_handle("TYP", 1, MB_TYPE_INTEGER, this->tags[typ], MB_TAG_CREAT);
-
+    rval = this->mb->tag_get_handle("TYP", 1, MB_TYPE_INTEGER, this->tags[typ], MB_TAG_DENSE | MB_TAG_CREAT);
+    rval = this->mb->tag_get_handle("LOCAL_ID", 1, MB_TYPE_INTEGER, this->tags[local_id], MB_TAG_DENSE | MB_TAG_CREAT);
     std::vector<Tag> tag_vector;
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 8; ++i) {
         tag_vector.push_back(this->tags[i]);
     }
     rval = this->pcomm->exchange_tags(tag_vector, tag_vector, empty_set);
@@ -179,7 +178,7 @@ void MPFADSolver::init_tags () {
     }
 }
 
-void MPFADSolver::assemble_matrix (Epetra_CrsMatrix& A, Epetra_Vector& b, Range volumes, Range faces, Range nodes) {
+void MPFADSolver::assemble_matrix (Epetra_CrsMatrix& A, Epetra_Vector& b, Range volumes, Range faces, Range nodes, int *gids) {
     ErrorCode rval;
 
     // Retrieving Dirichlet faces and nodes.
@@ -231,8 +230,16 @@ void MPFADSolver::assemble_matrix (Epetra_CrsMatrix& A, Epetra_Vector& b, Range 
     this->internal_nodes = subtract(this->internal_nodes, this->dirichlet_nodes);
     internal_faces = intersect(internal_faces, faces);
     this->internal_nodes = intersect(this->internal_nodes, nodes);
-
-
+    std::vector<int> auxTag(this->dirichlet_nodes.size(), 1);
+    rval = this->mb->tag_set_data(this->tags[typ], this->dirichlet_nodes, &auxTag[0]);
+    auxTag = std::vector<int> (this->neumann_nodes.size(), 2);
+    rval = this->mb->tag_set_data(this->tags[typ], this->neumann_nodes, &auxTag[0]);
+    auxTag = std::vector<int> (this->internal_nodes.size(), 3);
+    rval = this->mb->tag_set_data(this->tags[typ], this->internal_nodes, &auxTag[0]);
+    auxTag = std::vector<int>(volumes.size());
+    std::iota(auxTag.begin(), auxTag.end(), 0);
+    rval = this->mb->tag_set_data(this->tags[local_id], volumes, &auxTag[0]);
+    auxTag = std::vector<int>();
     LPEW3 interpolation_method (this->mb);
     clock_t ts;
 
@@ -269,7 +276,7 @@ void MPFADSolver::assemble_matrix (Epetra_CrsMatrix& A, Epetra_Vector& b, Range 
     ts = clock() - ts;
     printf("Done. Time elapsed dirichlet: %lf\n", ((double) ts) / CLOCKS_PER_SEC);
     ts = clock();
-    this->visit_internal_faces(A, b, internal_faces);
+    this->visit_internal_faces(A, b, internal_faces, gids, volumes.size());
     ts = clock() - ts;
     printf("Done. Time elapsed internal: %lf\n", ((double) ts) / CLOCKS_PER_SEC);
 }
@@ -311,12 +318,14 @@ void MPFADSolver::node_treatment (EntityHandle node, int id_left, int id_right,
                                     double k_eq, double d_JI, double d_JK,
                                     Epetra_CrsMatrix& A, Epetra_Vector& b,
                                     vector<vector <double> > &vectValues,
-                                    vector<vector <int> > &vectIndices) {
-    Range nodeR = Range(node, node);
+                                    vector<vector <int> > &vectIndices, int local_left, int local_right) {
+    //Range nodeR = Range(node, node);
     double rhs = 0.5 * k_eq * (d_JK + d_JI);
     double col_value;
     int vol_id = -1;
-    if (this->dirichlet_nodes.contains(nodeR)) {
+    int node_type = 0;
+    this->mb->tag_get_data(this->tags[typ], &node, 1, &node_type);
+    if (node_type == 1) {
         double pressure = 0.0, dirichlet_term;
         this->mb->tag_get_data(this->tags[dirichlet], &node, 1, &pressure);
         dirichlet_term = rhs*pressure;
@@ -325,7 +334,7 @@ void MPFADSolver::node_treatment (EntityHandle node, int id_left, int id_right,
         b.SumIntoGlobalValues(1, &dirichlet_term, &id_left);
         return;
     }
-    if (this->neumann_nodes.contains(nodeR)) {
+    if (node_type == 2) {
         double neu_term = this->weights[node][node], neumann_term;
         neumann_term = rhs*neu_term;
         b.SumIntoGlobalValues(1, &neumann_term, &id_right);
@@ -339,27 +348,27 @@ void MPFADSolver::node_treatment (EntityHandle node, int id_left, int id_right,
             this->mb->tag_get_data(this->tags[global_id], &(it->first), 1, &vol_id);
             col_value = -it->second * rhs;
             //A.InsertGlobalValues(id_right, 1, &col_value, &vol_id);
-            vectIndices[id_right].push_back(vol_id);
-            vectValues[id_right].push_back(col_value);
+            vectIndices[local_right].push_back(vol_id);
+            vectValues[local_right].push_back(col_value);
             col_value *= -1;
             //A.InsertGlobalValues(id_left, 1, &col_value, &vol_id);
-            vectIndices[id_left].push_back(vol_id);
-            vectValues[id_left].push_back(col_value);
+            vectIndices[local_left].push_back(vol_id);
+            vectValues[local_left].push_back(col_value);
         }
         return;
     }
 
-    if (internal_nodes.contains(nodeR)) {
+    if (node_type == 3) {
         for (std::map<EntityHandle, double>::iterator it = this->weights[node].begin(); it != this->weights[node].end(); ++it) {
             this->mb->tag_get_data(this->tags[global_id], &(it->first), 1, &vol_id);
             col_value = -it->second * rhs;
             //A.InsertGlobalValues(id_right, 1, &col_value, &vol_id);
-            vectIndices[id_right].push_back(vol_id);
-            vectValues[id_right].push_back(col_value);
+            vectIndices[local_right].push_back(vol_id);
+            vectValues[local_right].push_back(col_value);
             col_value *= -1;
             //A.InsertGlobalValues(id_left, 1, &col_value, &vol_id);
-            vectIndices[id_left].push_back(vol_id);
-            vectValues[id_left].push_back(col_value);
+            vectIndices[local_left].push_back(vol_id);
+            vectValues[local_left].push_back(col_value);
         }
         return;
     }
@@ -489,7 +498,7 @@ void MPFADSolver::visit_dirichlet_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, 
     }
 }
 
-void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, Range internal_faces) {
+void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, Range internal_faces, int *gids, int gids_size) {
     clock_t ts;
 
     Range face_vertices, vols_sharing_face;
@@ -502,8 +511,8 @@ void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, R
     int cols_ids[2];
     int count=0;
     double right_cols_values[2], left_cols_values[2];
-    std::vector< vector <double> > inMatrixValues (A.NumGlobalRows(), vector<double> (0));
-    std::vector< vector <int> > inMatrixIndices (A.NumGlobalRows(), vector<int> (0));
+    std::vector< vector <double> > inMatrixValues (gids_size, vector<double> (0));
+    std::vector< vector <int> > inMatrixIndices (gids_size, vector<int> (0));
 
     vert_coords = (double*) calloc(9, sizeof(double));
 
@@ -608,12 +617,14 @@ void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, R
 
         k_eq = (k_n_R * k_n_L / ((k_n_R * h_L) + (k_n_L * h_R))) * face_area;
 
-        int id_left, id_right;
-        this->mb->tag_get_data(this->tags[global_id], &left_volume, 1, &id_left);
-        this->mb->tag_get_data(this->tags[global_id], &right_volume, 1, &id_right);
-        this->node_treatment(face_vertices[0], id_left, id_right, k_eq, 0.0, d_JK, A, b, inMatrixValues, inMatrixIndices);
-        this->node_treatment(face_vertices[1], id_left, id_right, k_eq, d_JI, -d_JK, A, b, inMatrixValues, inMatrixIndices);
-        this->node_treatment(face_vertices[2], id_left, id_right, k_eq, -d_JI, 0.0, A, b, inMatrixValues, inMatrixIndices);
+        int id_left, id_right, local_left, local_right;
+        this->mb->tag_get_data(this->tags[local_id], &left_volume, 1, &local_left);
+        this->mb->tag_get_data(this->tags[local_id], &right_volume, 1, &local_right);
+        id_left = gids[local_left];
+        id_right = gids[local_right];
+        this->node_treatment(face_vertices[0], id_left, id_right, k_eq, 0.0, d_JK, A, b, inMatrixValues, inMatrixIndices, local_left, local_right);
+        this->node_treatment(face_vertices[1], id_left, id_right, k_eq, d_JI, -d_JK, A, b, inMatrixValues, inMatrixIndices, local_left, local_right);
+        this->node_treatment(face_vertices[2], id_left, id_right, k_eq, -d_JI, 0.0, A, b, inMatrixValues, inMatrixIndices, local_left, local_right);
         cols_ids[0] = id_right; cols_ids[1] = id_left;
         right_cols_values[0] = k_eq; right_cols_values[1] = -k_eq;
         left_cols_values[0] = -k_eq; left_cols_values[1] = k_eq;
@@ -624,10 +635,10 @@ void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, R
         face_vertices.clear();
         vols_sharing_face.clear();
     }
-    for(int i=0; i<A.NumGlobalRows(); i++){
+    for(int i=0; i<gids_size; i++){
       if(inMatrixIndices[i].size()>0){
-        A.InsertGlobalValues(i, inMatrixIndices[i].size(), &inMatrixValues[i][0], &inMatrixIndices[i][0]);
+        A.InsertGlobalValues(gids[i], inMatrixIndices[i].size(), &inMatrixValues[i][0], &inMatrixIndices[i][0]);
       }
     }
-    cout << count << '\n';
+    cout << "count " << count << '\n';
 }

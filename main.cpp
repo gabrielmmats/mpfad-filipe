@@ -8,10 +8,10 @@ int main (int argc, char **argv) {
 
     MPFADSolver* solver = new MPFADSolver();
 
-    solver->load_file("test_case_linear_anisotropic_neumann_part.h5m");
+    solver->load_file("test_case_linear_anisotropic_part.h5m");
     solver->run();
     printf("Writing file\n");
-    solver->write_file("test_case_linear_anisotropic_neumann_result.h5m");
+    solver->write_file("test_case_linear_anisotropic_part_result.h5m");
     printf("Done\n");
 
     delete solver;

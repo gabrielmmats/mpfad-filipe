@@ -43,7 +43,7 @@ using namespace moab;
 
 // Enumeration created to make the access to tags more readable.
 enum TagsID {global_id, permeability, centroid, dirichlet,
-                neumann, source, pressure, typ};
+                neumann, source, typ, local_id, pressure};
 
 class MPFADSolver {
 private:
@@ -63,7 +63,7 @@ public:
     void write_file (string fname);
 private:
     void setup_tags (Tag tag_handles[5]);
-    void assemble_matrix (Epetra_CrsMatrix& A, Epetra_Vector& b, Range volumes, Range faces, Range nodes);
+    void assemble_matrix (Epetra_CrsMatrix& A, Epetra_Vector& b, Range volumes, Range faces, Range nodes, int *gids);
     void set_pressure_tags (Epetra_Vector& X, Range& volumes);
     void init_tags ();
     double get_cross_diffusion_term (double tan[3], double vec[3], double s,
@@ -73,10 +73,10 @@ private:
     void node_treatment (EntityHandle node, int id_left, int id_right,
                         double k_eq, double d_JI, double d_JK, Epetra_CrsMatrix& A,
                         Epetra_Vector& b,vector<vector <double> > &vectValues,
-                        vector<vector <int> > &vectIndices);
+                        vector<vector <int> > &vectIndices, int local_left, int local_right);
     void visit_neumann_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, Range neumann_faces);
     void visit_dirichlet_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, Range dirichlet_faces);
-    void visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, Range internal_faces);
+    void visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, Range internal_faces, int *gids, int gids_size);
 };
 
 #endif
