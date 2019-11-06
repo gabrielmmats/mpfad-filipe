@@ -90,7 +90,7 @@ void MPFADSolver::run () {
     Epetra_Vector b (row_map);
     Epetra_Vector X (row_map);
 
-    this->assemble_matrix(A, b, volumes, faces, nodes, gids);
+    this->assemble_matrix(A, b, volumes, faces, nodes);
     A.FillComplete();
 
     Epetra_LinearProblem linear_problem (&A, &X, &b);
@@ -178,7 +178,7 @@ void MPFADSolver::init_tags () {
     }
 }
 
-void MPFADSolver::assemble_matrix (Epetra_CrsMatrix& A, Epetra_Vector& b, Range volumes, Range faces, Range nodes, int *gids) {
+void MPFADSolver::assemble_matrix (Epetra_CrsMatrix& A, Epetra_Vector& b, Range volumes, Range faces, Range nodes) {
     ErrorCode rval;
 
     // Retrieving Dirichlet faces and nodes.
@@ -276,7 +276,7 @@ void MPFADSolver::assemble_matrix (Epetra_CrsMatrix& A, Epetra_Vector& b, Range 
     ts = clock() - ts;
     printf("Done. Time elapsed dirichlet: %lf\n", ((double) ts) / CLOCKS_PER_SEC);
     ts = clock();
-    this->visit_internal_faces(A, b, internal_faces, gids, volumes.size());
+    this->visit_internal_faces(A, b, internal_faces);
     ts = clock() - ts;
     printf("Done. Time elapsed internal: %lf\n", ((double) ts) / CLOCKS_PER_SEC);
 }
@@ -316,9 +316,7 @@ double MPFADSolver::get_cross_diffusion_term (double tan[3], double vec[3], doub
 
 void MPFADSolver::node_treatment (EntityHandle node, int id_left, int id_right,
                                     double k_eq, double d_JI, double d_JK,
-                                    Epetra_CrsMatrix& A, Epetra_Vector& b,
-                                    vector<vector <double> > &vectValues,
-                                    vector<vector <int> > &vectIndices, int local_left, int local_right) {
+                                    Epetra_CrsMatrix& A, Epetra_Vector& b) {
     //Range nodeR = Range(node, node);
     double rhs = 0.5 * k_eq * (d_JK + d_JI);
     double col_value;
@@ -347,13 +345,9 @@ void MPFADSolver::node_treatment (EntityHandle node, int id_left, int id_right,
             }
             this->mb->tag_get_data(this->tags[global_id], &(it->first), 1, &vol_id);
             col_value = -it->second * rhs;
-            //A.InsertGlobalValues(id_right, 1, &col_value, &vol_id);
-            vectIndices[local_right].push_back(vol_id);
-            vectValues[local_right].push_back(col_value);
+            A.InsertGlobalValues(id_right, 1, &col_value, &vol_id);
             col_value *= -1;
-            //A.InsertGlobalValues(id_left, 1, &col_value, &vol_id);
-            vectIndices[local_left].push_back(vol_id);
-            vectValues[local_left].push_back(col_value);
+            A.InsertGlobalValues(id_left, 1, &col_value, &vol_id);
         }
         return;
     }
@@ -362,13 +356,9 @@ void MPFADSolver::node_treatment (EntityHandle node, int id_left, int id_right,
         for (std::map<EntityHandle, double>::iterator it = this->weights[node].begin(); it != this->weights[node].end(); ++it) {
             this->mb->tag_get_data(this->tags[global_id], &(it->first), 1, &vol_id);
             col_value = -it->second * rhs;
-            //A.InsertGlobalValues(id_right, 1, &col_value, &vol_id);
-            vectIndices[local_right].push_back(vol_id);
-            vectValues[local_right].push_back(col_value);
+            A.InsertGlobalValues(id_right, 1, &col_value, &vol_id);
             col_value *= -1;
-            //A.InsertGlobalValues(id_left, 1, &col_value, &vol_id);
-            vectIndices[local_left].push_back(vol_id);
-            vectValues[local_left].push_back(col_value);
+            A.InsertGlobalValues(id_left, 1, &col_value, &vol_id);
         }
         return;
     }
@@ -498,7 +488,7 @@ void MPFADSolver::visit_dirichlet_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, 
     }
 }
 
-void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, Range internal_faces, int *gids, int gids_size) {
+void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, Range internal_faces) {
     clock_t ts;
 
     Range face_vertices, vols_sharing_face;
@@ -511,8 +501,8 @@ void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, R
     int cols_ids[2];
     int count=0;
     double right_cols_values[2], left_cols_values[2];
-    std::vector< vector <double> > inMatrixValues (gids_size, vector<double> (0));
-    std::vector< vector <int> > inMatrixIndices (gids_size, vector<int> (0));
+    //std::vector< vector <double> > inMatrixValues (gids_size, vector<double> (0));
+    //std::vector< vector <int> > inMatrixIndices (gids_size, vector<int> (0));
 
     vert_coords = (double*) calloc(9, sizeof(double));
 
@@ -617,14 +607,16 @@ void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, R
 
         k_eq = (k_n_R * k_n_L / ((k_n_R * h_L) + (k_n_L * h_R))) * face_area;
 
-        int id_left, id_right, local_left, local_right;
-        this->mb->tag_get_data(this->tags[local_id], &left_volume, 1, &local_left);
-        this->mb->tag_get_data(this->tags[local_id], &right_volume, 1, &local_right);
-        id_left = gids[local_left];
-        id_right = gids[local_right];
-        this->node_treatment(face_vertices[0], id_left, id_right, k_eq, 0.0, d_JK, A, b, inMatrixValues, inMatrixIndices, local_left, local_right);
-        this->node_treatment(face_vertices[1], id_left, id_right, k_eq, d_JI, -d_JK, A, b, inMatrixValues, inMatrixIndices, local_left, local_right);
-        this->node_treatment(face_vertices[2], id_left, id_right, k_eq, -d_JI, 0.0, A, b, inMatrixValues, inMatrixIndices, local_left, local_right);
+        int id_left, id_right;
+        this->mb->tag_get_data(this->tags[global_id], &left_volume, 1, &id_left);
+        this->mb->tag_get_data(this->tags[global_id], &right_volume, 1, &id_right);
+        //this->mb->tag_get_data(this->tags[local_id], &left_volume, 1, &local_left);
+        //this->mb->tag_get_data(this->tags[local_id], &right_volume, 1, &local_right);
+        //id_left = gids[local_left];
+        //id_right = gids[local_right];
+        this->node_treatment(face_vertices[0], id_left, id_right, k_eq, 0.0, d_JK, A, b);
+        this->node_treatment(face_vertices[1], id_left, id_right, k_eq, d_JI, -d_JK, A, b);
+        this->node_treatment(face_vertices[2], id_left, id_right, k_eq, -d_JI, 0.0, A, b;
         cols_ids[0] = id_right; cols_ids[1] = id_left;
         right_cols_values[0] = k_eq; right_cols_values[1] = -k_eq;
         left_cols_values[0] = -k_eq; left_cols_values[1] = k_eq;
@@ -635,10 +627,10 @@ void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, R
         face_vertices.clear();
         vols_sharing_face.clear();
     }
-    for(int i=0; i<gids_size; i++){
+    /*for(int i=0; i<gids_size; i++){
       if(inMatrixIndices[i].size()>0){
         A.InsertGlobalValues(gids[i], inMatrixIndices[i].size(), &inMatrixValues[i][0], &inMatrixIndices[i][0]);
       }
-    }
+    }*/
     cout << "count " << count << '\n';
 }
