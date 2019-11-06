@@ -629,5 +629,5 @@ void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, R
         A.InsertGlobalValues(gids[i], inMatrixIndices[i].size(), &inMatrixValues[i][0], &inMatrixIndices[i][0]);
       }
     }*/
-    cout << "count " << count << '\n';
+    //cout << "count " << count << '\n';
 }
