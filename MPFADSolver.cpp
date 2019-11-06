@@ -616,7 +616,7 @@ void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, R
         //id_right = gids[local_right];
         this->node_treatment(face_vertices[0], id_left, id_right, k_eq, 0.0, d_JK, A, b);
         this->node_treatment(face_vertices[1], id_left, id_right, k_eq, d_JI, -d_JK, A, b);
-        this->node_treatment(face_vertices[2], id_left, id_right, k_eq, -d_JI, 0.0, A, b;
+        this->node_treatment(face_vertices[2], id_left, id_right, k_eq, -d_JI, 0.0, A, b);
         cols_ids[0] = id_right; cols_ids[1] = id_left;
         right_cols_values[0] = k_eq; right_cols_values[1] = -k_eq;
         left_cols_values[0] = -k_eq; left_cols_values[1] = k_eq;
