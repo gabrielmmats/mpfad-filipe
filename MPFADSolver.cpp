@@ -236,9 +236,6 @@ void MPFADSolver::assemble_matrix (Epetra_CrsMatrix& A, Epetra_Vector& b, Range 
     rval = this->mb->tag_set_data(this->tags[typ], this->neumann_nodes, &auxTag[0]);
     auxTag = std::vector<int> (this->internal_nodes.size(), 3);
     rval = this->mb->tag_set_data(this->tags[typ], this->internal_nodes, &auxTag[0]);
-    auxTag = std::vector<int>(volumes.size());
-    std::iota(auxTag.begin(), auxTag.end(), 0);
-    rval = this->mb->tag_set_data(this->tags[local_id], volumes, &auxTag[0]);
     auxTag = std::vector<int>();
     LPEW3 interpolation_method (this->mb);
     clock_t ts;
