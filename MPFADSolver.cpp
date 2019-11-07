@@ -82,7 +82,7 @@ void MPFADSolver::run () {
     if (rval != MB_SUCCESS) {
         throw runtime_error("tag_get_data for gids failed\n");
     }
-
+    //
     // Setting up Epetra structures
     Epetra_MpiComm epetra_comm (MPI_COMM_WORLD);
     Epetra_Map row_map (num_global_elems, num_local_elems, gids, 0, epetra_comm);
