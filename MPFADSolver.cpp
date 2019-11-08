@@ -487,7 +487,7 @@ void MPFADSolver::visit_dirichlet_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, 
 
 void MPFADSolver::visit_internal_faces (Epetra_CrsMatrix& A, Epetra_Vector& b, Range internal_faces) {
     clock_t ts;
-
+//
     Range face_vertices, vols_sharing_face;
     double face_area = 0, d_JK = 0, d_JI = 0, k_eq = 0;
     double h_L = 0, k_n_L = 0, k_L_JI = 0, k_L_JK = 0;
